@@ -24,7 +24,13 @@ const Dashboard = () => {
         if (!user || !user.id) return;
         if (isSilent) setIsRefreshingRecs(true);
         try {
-            const recRes = await axios.get(`http://localhost:5000/api/products/auto-recommend/${user.id}`);
+            const activityLog = JSON.parse(sessionStorage.getItem('activity_log') || '[]');
+            const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
+            
+            const recRes = await axios.post(`http://localhost:5000/api/products/auto-recommend/${user.id}`, {
+                session_activity: activityLog.slice(-15),
+                cart: cartItems.map(item => item.id)
+            });
             if (recRes.data && recRes.data.recommendations) {
                 setRecommendations(recRes.data.recommendations);
             }

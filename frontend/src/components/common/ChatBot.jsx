@@ -42,9 +42,14 @@ const ChatBot = () => {
       // Build history format for backend
       const history = messages.map(m => ({ role: m.role, text: m.text }));
       
+      // Get recent browsing context
+      const activityLog = JSON.parse(sessionStorage.getItem('activity_log') || '[]');
+      const recentContext = activityLog.slice(-10); // Last 10 actions
+      
       const response = await axios.post('http://localhost:5000/api/chat', {
         message: userText,
-        history: history
+        history: history,
+        context: recentContext
       });
       
       const botMsg = {

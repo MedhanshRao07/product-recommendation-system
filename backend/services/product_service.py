@@ -190,6 +190,23 @@ class ProductService:
         return valid_products
 
     @staticmethod
+    def _get_base_image_id(url):
+        if not url: return None
+        import re
+        match = re.search(r'/images/I/([^.]+)', url)
+        if match:
+            return match.group(1)
+        return url
+
+    @staticmethod
+    def _get_title_tokens(title):
+        if not title: return set()
+        import re
+        words = re.findall(r'\w+', title.lower())
+        stop = {'the','a','an','and','or','with','for','men','mens','women','womens','in','on','of','to'}
+        return set(w for w in words if len(w) > 2 and w not in stop)
+
+    @staticmethod
     def diversify_feed(products, limit=None):
         """Greedily select products to maximize feed diversity and prevent adjacent duplicates."""
         if not products:
@@ -198,8 +215,11 @@ class ProductService:
         diversified = []
         recent_images = []
         recent_subcats = []
+        recent_brands = []
+        recent_title_tokens = []
         seen_names = set()
         seen_ids = set()
+        seen_base_images = set() # STRICT BASE IMAGE CONSTRAINT
         
         pool = list(products)
         
@@ -209,22 +229,32 @@ class ProductService:
             valid_found = False
             
             for i, p in enumerate(pool):
-                if p['id'] in seen_ids or p.get('name') in seen_names:
+                img = p.get('image_url')
+                base_img = ProductService._get_base_image_id(img)
+                
+                if p['id'] in seen_ids or p.get('name') in seen_names or (base_img and base_img in seen_base_images):
                     continue
                     
                 valid_found = True
                 score = 0
-                img = p.get('image_url')
                 subcat = p.get('subcategory')
+                brand = p.get('brand')
+                tokens = ProductService._get_title_tokens(p.get('name'))
                 
-                # Dynamic image reuse penalty
-                if img in recent_images:
-                    distance = list(reversed(recent_images)).index(img)
-                    if distance == 0:
-                        score -= 500  # Adjacent
-                    else:
-                        score -= 200 * (1.0 / (distance + 1))  # Decaying penalty
-                        
+                # Check title similarity against recently chosen items
+                if tokens and recent_title_tokens:
+                    for dist, recent_toks in enumerate(reversed(recent_title_tokens)):
+                        if not recent_toks: continue
+                        intersection = len(tokens & recent_toks)
+                        union = len(tokens | recent_toks)
+                        if union > 0:
+                            sim = intersection / union
+                            if sim > 0.4:
+                                if dist == 0:
+                                    score -= 60 # Heavy penalty for adjacent similar titles
+                                else:
+                                    score -= 30 * (1.0 / (dist + 1))
+                
                 # Dynamic subcategory reuse penalty
                 if subcat in recent_subcats:
                     distance = list(reversed(recent_subcats)).index(subcat)
@@ -232,6 +262,14 @@ class ProductService:
                         score -= 20
                     else:
                         score -= 10 * (1.0 / (distance + 1))
+                        
+                # Dynamic brand reuse penalty
+                if brand in recent_brands:
+                    distance = list(reversed(recent_brands)).index(brand)
+                    if distance == 0:
+                        score -= 30
+                    else:
+                        score -= 15 * (1.0 / (distance + 1))
                     
                 # Base ordering preference (retain original ranking where possible)
                 score -= i * 5
@@ -248,15 +286,21 @@ class ProductService:
             seen_ids.add(chosen['id'])
             if chosen.get('name'):
                 seen_names.add(chosen['name'])
+                
+            base_chosen_img = ProductService._get_base_image_id(chosen.get('image_url'))
+            if base_chosen_img:
+                seen_base_images.add(base_chosen_img)
             
             recent_images.append(chosen.get('image_url'))
             recent_subcats.append(chosen.get('subcategory'))
+            recent_brands.append(chosen.get('brand'))
+            recent_title_tokens.append(ProductService._get_title_tokens(chosen.get('name')))
             
             # Increase history memory to 8 items for stronger diversity
-            if len(recent_images) > 8:
-                recent_images.pop(0)
-            if len(recent_subcats) > 8:
-                recent_subcats.pop(0)
+            if len(recent_images) > 8: recent_images.pop(0)
+            if len(recent_subcats) > 8: recent_subcats.pop(0)
+            if len(recent_brands) > 8: recent_brands.pop(0)
+            if len(recent_title_tokens) > 8: recent_title_tokens.pop(0)
                 
         return diversified
 
@@ -292,7 +336,7 @@ class ProductService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM products ORDER BY rating DESC LIMIT %s", (limit * 3,))
+            cursor.execute("SELECT * FROM products WHERE price >= 10.0 ORDER BY review_count DESC, rating DESC LIMIT %s", (limit * 3,))
             products = cursor.fetchall()
             valid = ProductService.filter_valid_products(products)
             return ProductService.diversify_feed(valid, limit)
@@ -398,7 +442,7 @@ class ProductService:
             grouped = {}
             for cat in categories:
                 cursor.execute(
-                    "SELECT * FROM products WHERE category = %s ORDER BY rating DESC LIMIT %s",
+                    "SELECT * FROM products WHERE category = %s AND price >= 10.0 ORDER BY review_count DESC, rating DESC LIMIT %s",
                     (cat, per_category * 3)
                 )
                 valid = ProductService.filter_valid_products(cursor.fetchall())
@@ -406,7 +450,7 @@ class ProductService:
                 
                 if len(feed) < per_category:
                     cursor.execute(
-                        "SELECT * FROM products WHERE category != %s ORDER BY rating DESC LIMIT 20",
+                        "SELECT * FROM products WHERE category != %s AND price >= 10.0 ORDER BY review_count DESC, rating DESC LIMIT 20",
                         (cat,)
                     )
                     padding = ProductService.filter_valid_products(cursor.fetchall())
@@ -519,7 +563,7 @@ class ProductService:
                 conn.close()
 
     @staticmethod
-    def get_auto_recommendations(user_id):
+    def get_auto_recommendations(user_id, session_activity=None, cart_ids=None):
         """
         Highly Adaptive Recommendation Engine:
         Strictly limits unrelated products to 1-2 items maximum.
@@ -539,7 +583,36 @@ class ProductService:
                 ORDER BY ua.created_at DESC
                 LIMIT 50
             """, (user_id,))
-            history = cursor.fetchall()
+            db_history = cursor.fetchall()
+            
+            # Merge real-time frontend session tracking (overrides stale DB mock data)
+            live_history = []
+            seen_live_ids = set()
+            
+            if cart_ids:
+                for pid in cart_ids:
+                    if pid not in seen_live_ids:
+                        cursor.execute("SELECT id, category, brand, name, price FROM products WHERE id = %s", (pid,))
+                        p = cursor.fetchone()
+                        if p:
+                            p['action'] = 'in_cart'
+                            live_history.append(p)
+                            seen_live_ids.add(pid)
+                            
+            if session_activity:
+                for act in reversed(session_activity): # Most recent first
+                    pid = act.get('product_id')
+                    if pid and pid not in seen_live_ids:
+                        cursor.execute("SELECT id, category, brand, name, price FROM products WHERE id = %s", (pid,))
+                        p = cursor.fetchone()
+                        if p:
+                            p['action'] = act.get('action', 'view')
+                            live_history.append(p)
+                            seen_live_ids.add(pid)
+                            
+            # Prepend live history so it dictates the time decay (0.0 at idx 0)
+            history = live_history + db_history
+            history = history[:30] # Limit pool to avoid old interactions dominating
             
             history_ids = set(row['id'] for row in history)
             latest_viewed = history[0] if history else None
@@ -551,6 +624,7 @@ class ProductService:
                 'wishlist': 3,
                 'add_to_cart': 5,
                 'cart': 5,
+                'in_cart': 15, # Cart items are the strongest signal possible!
                 'purchase': 10
             }
             
@@ -571,35 +645,78 @@ class ProductService:
             if category_scores:
                 dominant_category = max(category_scores.items(), key=lambda x: x[1])[0]
                 
-            # 4. Collaborative Filtering Candidates
+            # 4. TF-IDF + Collaborative Filtering Candidates
             candidates = []
+            candidates_dict = {}
+            
             if history_ids:
                 placeholders = ','.join(['%s'] * len(history_ids))
                 cursor.execute(f"""
-                    SELECT p.id, p.category, p.brand, p.name, p.rating, p.price, COUNT(*) as collab_weight
+                    SELECT p.id, p.category, p.brand, p.name, p.rating, p.price, p.image_url, COUNT(*) as collab_weight
                     FROM user_activity ua
                     JOIN products p ON ua.product_id = p.id
                     WHERE ua.user_id IN (
                         SELECT DISTINCT user_id FROM user_activity WHERE product_id IN ({placeholders}) AND user_id != %s
                     )
-                    AND p.id NOT IN ({placeholders})
+                    AND p.id NOT IN ({placeholders}) AND p.price >= 10.0
                     GROUP BY p.id
                     ORDER BY collab_weight DESC
-                    LIMIT 300
+                    LIMIT 150
                 """, (*list(history_ids), user_id, *list(history_ids)))
-                candidates = cursor.fetchall()
+                collab_candidates = cursor.fetchall()
+                for c in collab_candidates:
+                    candidates_dict[c['id']] = c
+                    
+                # Inject TF-IDF content similarity candidates
+                try:
+                    from ..recommendation.engine import get_recommender
+                    engine = get_recommender()
+                    tfidf_results = engine.get_similar_to_multiple(list(history_ids), top_n=100)
+                    
+                    if tfidf_results:
+                        tfidf_ids = [pid for pid, score in tfidf_results]
+                        tfidf_placeholders = ','.join(['%s'] * len(tfidf_ids))
+                        cursor.execute(f"""
+                            SELECT id, category, brand, name, rating, price, image_url
+                            FROM products WHERE id IN ({tfidf_placeholders}) AND price >= 10.0
+                        """, tfidf_ids)
+                        tfidf_products = cursor.fetchall()
+                        
+                        score_map = {pid: score for pid, score in tfidf_results}
+                        for p in tfidf_products:
+                            if p['id'] not in candidates_dict:
+                                p['tfidf_score'] = score_map.get(p['id'], 0)
+                                candidates_dict[p['id']] = p
+                            else:
+                                candidates_dict[p['id']]['tfidf_score'] = score_map.get(p['id'], 0)
+                except Exception as e:
+                    logger.error(f"Error fetching TF-IDF candidates: {e}")
+                            
+            candidates = list(candidates_dict.values())
             
             if not candidates:
-                cursor.execute("SELECT id, category, brand, name, rating, price, image_url FROM products ORDER BY rating DESC LIMIT 100")
-                candidates = cursor.fetchall()
+                cursor.execute("SELECT id, category, brand, name, rating, price, image_url FROM products WHERE price >= 10.0 ORDER BY review_count DESC, rating DESC LIMIT 300")
+                fallback_pool = cursor.fetchall()
+                
+                # Interleave fallback by category to prevent electronics dominance
+                cat_dict = defaultdict(list)
+                for f in fallback_pool:
+                    cat_dict[f['category']].append(f)
+                
+                while cat_dict and len(candidates) < 60:
+                    for cat in list(cat_dict.keys()):
+                        candidates.append(cat_dict[cat].pop(0))
+                        if not cat_dict[cat]:
+                            del cat_dict[cat]
+                            
                 # Cold start: if no history, forcefully categorize the candidates to create sections
                 if not history_ids:
                     for i, c in enumerate(candidates[:12]):
                         if i < 4:
-                            c['recommendation_reason'] = "Trending Now"
+                            c['recommendation_reason'] = f"Top {c['category']}"
                             c['base_score'] = 1.0 - (i * 0.01)
                         elif i < 8:
-                            c['recommendation_reason'] = f"Popular in {c['category']}"
+                            c['recommendation_reason'] = "Trending Now"
                             c['base_score'] = 0.8 - (i * 0.01)
                         else:
                             c['recommendation_reason'] = "Staff Picks"
@@ -608,15 +725,17 @@ class ProductService:
                 
             max_collab = max((c.get('collab_weight', 0) for c in candidates), default=1) or 1
             max_rating = max((c.get('rating', 0) or 0 for c in candidates), default=5.0) or 5.0
+            max_tfidf = max((c.get('tfidf_score', 0) for c in candidates), default=1.0) or 1.0
             
             related_map = {
-                'Electronics': ['Headphones', 'Accessories', 'Watches'],
+                'Electronics': ['Headphones', 'Accessories', 'Watches', 'Home & Kitchen'],
                 'Headphones': ['Electronics', 'Accessories'],
                 'Fitness': ['Shoes', 'Accessories'],
                 'Shoes': ['Fitness', 'Bags'],
                 'Watches': ['Accessories', 'Bags', 'Electronics'],
                 'Bags': ['Watches', 'Accessories', 'Shoes'],
-                'Accessories': ['Watches', 'Bags', 'Electronics']
+                'Accessories': ['Watches', 'Bags', 'Electronics'],
+                'Home & Kitchen': ['Electronics', 'Accessories']
             }
             
             dominant_pool = []
@@ -624,13 +743,15 @@ class ProductService:
             unrelated_pool = []
             
             for c in candidates:
-                # Base scoring
+                # Base scoring (Now includes TF-IDF)
                 collab_score = c.get('collab_weight', 0) / max_collab
+                tfidf_score = c.get('tfidf_score', 0) / max_tfidf
+                
                 max_brand = max(brand_scores.values()) if brand_scores else 1
                 brand_score = brand_scores.get(c['brand'], 0) / (max_brand or 1)
                 popularity = (c.get('rating', 0) or 0) / max_rating
                 
-                final_score = (0.40 * collab_score) + (0.30 * brand_score) + (0.30 * popularity)
+                final_score = (0.30 * collab_score) + (0.30 * tfidf_score) + (0.20 * brand_score) + (0.20 * popularity)
                 c['base_score'] = final_score
                 
                 # Assign to pools and generate strict labels
@@ -694,7 +815,7 @@ class ProductService:
                         
             # Ensure at least 6 items
             if len(ordered_products) < 6:
-                cursor.execute("SELECT * FROM products ORDER BY rating DESC LIMIT 20")
+                cursor.execute("SELECT * FROM products WHERE price >= 10.0 ORDER BY review_count DESC, rating DESC LIMIT 20")
                 fallback_products = ProductService.filter_valid_products(cursor.fetchall())
                 for fp in fallback_products:
                     if len(ordered_products) >= 12:
@@ -733,13 +854,14 @@ class ProductService:
             
             # Related category relationships
             related_map = {
-                'Electronics': ['Headphones', 'Accessories', 'Watches'],
+                'Electronics': ['Headphones', 'Accessories', 'Watches', 'Home & Kitchen'],
                 'Headphones': ['Electronics', 'Accessories'],
                 'Fitness': ['Shoes', 'Accessories'],
                 'Shoes': ['Fitness', 'Bags'],
                 'Watches': ['Accessories', 'Bags', 'Electronics'],
                 'Bags': ['Watches', 'Accessories', 'Shoes'],
-                'Accessories': ['Watches', 'Bags', 'Electronics']
+                'Accessories': ['Watches', 'Bags', 'Electronics'],
+                'Home & Kitchen': ['Electronics', 'Accessories']
             }
             related_cats = related_map.get(cat, [])
             

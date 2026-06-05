@@ -60,9 +60,16 @@ def track_activity():
         return jsonify({"message": "Activity tracked successfully"}), 200
     return jsonify({"error": "Failed to track activity"}), 500
 
-@product_bp.route('/auto-recommend/<int:user_id>', methods=['GET'])
+@product_bp.route('/auto-recommend/<int:user_id>', methods=['GET', 'POST'])
 def auto_recommend(user_id):
-    recommendations = ProductService.get_auto_recommendations(user_id)
+    session_activity = []
+    cart_ids = []
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        session_activity = data.get('session_activity', [])
+        cart_ids = data.get('cart', [])
+        
+    recommendations = ProductService.get_auto_recommendations(user_id, session_activity, cart_ids)
     return jsonify({"recommendations": recommendations}), 200
 
 @product_bp.route('/grouped', methods=['GET'])

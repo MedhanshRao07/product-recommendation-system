@@ -12,12 +12,26 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         const checkAuth = async () => {
             try {
+                // Instant UI hydration from localStorage
+                const userStr = localStorage.getItem('user');
+                if (userStr) {
+                    try {
+                        const parsed = JSON.parse(userStr);
+                        if (parsed.user) {
+                            setUser(parsed.user);
+                            setLoading(false); // Drop loading immediately for fast UX
+                        }
+                    } catch (e) {}
+                }
+
                 const userData = await authService.getCurrentUser();
                 setUser(userData);
             } catch (error) {
-                // Ignore, user is not logged in or token expired
-                setUser(null);
-                authService.logout(); // Ensure clean state
+                // Only clear React state; authService handles wiping localStorage if it was a 401
+                const userStr = localStorage.getItem('user');
+                if (!userStr) {
+                    setUser(null);
+                }
             } finally {
                 setLoading(false);
             }

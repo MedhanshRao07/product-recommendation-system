@@ -39,9 +39,11 @@ const getCurrentUser = async () => {
     if (!userStr) throw new Error("No token found");
 
     let token = null;
+    let localUser = null;
     try {
         const parsed = JSON.parse(userStr);
         token = parsed.access_token;
+        localUser = parsed.user;
     } catch (e) {
         throw new Error("Invalid token format");
     }
@@ -54,12 +56,23 @@ const getCurrentUser = async () => {
                 Authorization: `Bearer ${token}`
             }
         });
+        
+        // Keep localStorage updated with fresh user data
+        const newLocalUser = { access_token: token, user: response.data };
+        localStorage.setItem('user', JSON.stringify(newLocalUser));
+        
         return response.data;
     } catch (error) {
-        console.error("Auth fetch error:", error.response?.status);
+        console.error("Auth fetch error:", error?.response?.status);
         if (error.response && error.response.status === 401) {
             logout();
-            // We removed window.location.href here to allow React Router to handle redirects
+            throw error;
+        }
+        
+        // Network error (backend offline) or other server error -> persist local state
+        if (localUser) {
+            console.warn("Backend unreachable, returning cached user from localStorage");
+            return localUser;
         }
         throw error;
     }

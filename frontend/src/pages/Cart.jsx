@@ -1,11 +1,25 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useCart } from '../context/CartContext';
 import { useNavigate } from 'react-router-dom';
 import SafeImage from '../components/common/SafeImage';
+import axios from 'axios';
+import ProductCard from '../components/products/ProductCard';
 
 const Cart = () => {
     const { cart, removeFromCart, updateQuantity, cartTotal } = useCart();
     const navigate = useNavigate();
+    const [relatedProducts, setRelatedProducts] = useState([]);
+
+    useEffect(() => {
+        if (cart.length > 0) {
+            const lastItem = cart[cart.length - 1];
+            axios.get(`http://localhost:5000/api/products/related/${lastItem.id}`)
+                .then(res => setRelatedProducts(res.data.slice(0, 4)))
+                .catch(err => console.error("Error fetching cart recommendations:", err));
+        } else {
+            setRelatedProducts([]);
+        }
+    }, [cart]);
 
     const taxRate = 0.05;
     const taxAmount = cartTotal * taxRate;
@@ -158,6 +172,18 @@ const Cart = () => {
                                     Checkout
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Frequently Bought Together / You May Also Like */}
+                {cart.length > 0 && relatedProducts.length > 0 && (
+                    <div className="mt-16 pt-8 border-t-2 border-black">
+                        <h2 className="text-2xl font-black uppercase tracking-tight mb-8">Frequently Bought Together</h2>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            {relatedProducts.map(product => (
+                                <ProductCard key={product.id} product={product} />
+                            ))}
                         </div>
                     </div>
                 )}

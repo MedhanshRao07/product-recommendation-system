@@ -5,6 +5,7 @@ import { useCart } from '../context/CartContext';
 import ProductCard from '../components/products/ProductCard';
 import CompareDropdown from '../components/products/CompareDropdown';
 import activityTracker from '../services/activityTracker';
+import SafeImage from '../components/common/SafeImage';
 
 const ProductDetail = () => {
     const { id } = useParams();
@@ -104,13 +105,13 @@ const ProductDetail = () => {
 
                     {/* Product Image */}
                     <div className="w-full lg:w-1/2 flex-shrink-0 bg-gray-50 overflow-hidden relative">
-                        {product.image_url && product.image_url !== 'url' && product.image_url !== 'url_here' ? (
-                            <img src={product.image_url} alt={product.name} className="w-full h-auto aspect-square object-cover" loading="lazy" />
-                        ) : (
-                            <div className="w-full aspect-square flex items-center justify-center text-gray-300">
-                                <span className="font-bold uppercase tracking-widest">No Image</span>
-                            </div>
-                        )}
+                        <SafeImage 
+                            src={product.image_url} 
+                            alt={product.name} 
+                            category={product.category}
+                            productName={product.name}
+                            className="w-full h-auto aspect-square object-cover mix-blend-multiply" 
+                        />
                         {/* Category badge */}
                         <div className="absolute top-4 left-4 bg-black/80 text-white text-xs font-bold uppercase tracking-wider px-3 py-1">
                             {product.category}

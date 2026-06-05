@@ -19,9 +19,10 @@ def chat():
             return jsonify({"error": "Message is required"}), 400
             
         conversation_history = data.get('history', [])
+        user_context = data.get('context', [])
         
         # Process via Chatbot Service
-        result = chatbot_service.chat(user_message, conversation_history)
+        result = chatbot_service.chat(user_message, conversation_history, user_context)
         
         return jsonify(result), 200
         
