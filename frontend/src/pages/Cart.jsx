@@ -1,6 +1,7 @@
 import React from 'react';
 import { useCart } from '../context/CartContext';
 import { useNavigate } from 'react-router-dom';
+import SafeImage from '../components/common/SafeImage';
 
 const Cart = () => {
     const { cart, removeFromCart, updateQuantity, cartTotal } = useCart();
@@ -74,11 +75,13 @@ const Cart = () => {
                                 <div key={item.id} className="flex gap-4 bg-white border border-gray-200 p-4 hover:border-black transition-colors duration-200">
                                     {/* Image */}
                                     <div className="w-24 h-24 flex-shrink-0 bg-gray-100 overflow-hidden">
-                                        {item.image_url && item.image_url !== 'url' ? (
-                                            <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">No Image</div>
-                                        )}
+                                        <SafeImage 
+                                            src={item.image_url} 
+                                            alt={item.name} 
+                                            category={item.category}
+                                            productName={item.name}
+                                            className="w-full h-full object-cover" 
+                                        />
                                     </div>
                                     
                                     {/* Details */}

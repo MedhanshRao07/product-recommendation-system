@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Loader2, Sparkles, ShoppingBag } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import SafeImage from './SafeImage';
 
 const ChatBot = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -79,9 +80,11 @@ const ChatBot = () => {
     <Link to={`/product/${product.id}`} className="block mt-2">
       <div className="flex border-2 border-black p-2 bg-white hover:bg-gray-50 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
         <div className="w-16 h-16 border-2 border-black flex-shrink-0 bg-gray-100 overflow-hidden">
-          <img 
+          <SafeImage 
             src={product.image_url} 
             alt={product.name} 
+            category={product.category}
+            productName={product.name}
             className="w-full h-full object-cover mix-blend-multiply"
           />
         </div>
