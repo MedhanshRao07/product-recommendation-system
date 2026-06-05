@@ -92,3 +92,24 @@ ehthumbs.db
 !requirements.txt
 !package.json
 !README.md
+!datasets/products.csv
+!datasets/interactions.csv
+
+# ==============================================================================
+# Additional Ignores Added via Audit
+# ==============================================================================
+*.env
+.mypy_cache/
+.next/
+
+# Dataset/Temporary Archives
+*.zip
+archive*.zip
+temp/
+tmp/
+cache/
+generated/
+
+# Runtime/Deployment
+uploads/
+*.sqlite3
