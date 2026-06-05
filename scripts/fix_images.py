@@ -1,169 +1,103 @@
-"""
-Fix product images using deterministic, local static image mapping per keyword.
-Prevents heavy duplication while maintaining strict product-type matching.
-"""
-import os
 import mysql.connector
-from dotenv import load_dotenv
+import os
+from collections import defaultdict
+import random
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-load_dotenv(os.path.join(PROJECT_ROOT, 'backend', '.env'))
-
-DB = {
-    'host': os.getenv('DB_HOST', '127.0.0.1'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'suggestify_db')
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'mr_0706',
+    'database': 'suggestify_db'
 }
 
-PRODUCT_MAP_LISTS = {
-    'smartwatch': [
-        '/images/products/rolex_submariner.png'
-    ],
-    'watch': [
-        '/images/products/rolex_submariner.png'
-    ],
-    'wallet': [
-        '/images/products/wallet1.png'
-    ],
-    'belt': [
-        '/images/products/belt1.png'
-    ],
-    'flannel': [
-        '/images/products/shirt1.png'
-    ],
-    'polo': [
-        '/images/products/polo.png'
-    ],
-    'shirt': [
-        '/images/products/shirt1.png'
-    ],
-    'sweater': [
-        '/images/products/patagonia_sweater.png'
-    ],
-    'shoe': [
-        '/images/products/nike_air_force.png',
-        '/images/products/new_balance.png'
-    ],
-    'sneaker': [
-        '/images/products/nike_air_force.png',
-        '/images/products/new_balance.png'
-    ],
-    'boot': [
-        '/images/products/timberland_boot.png'
-    ],
-    'headphones': [
-        '/images/products/sony_headphones.png'
-    ],
-    'keyboard': [
-        '/images/products/keyboard1.png'
-    ],
-    'mouse': [
-        '/images/products/mouse.png'
-    ],
-    'monitor': [
-        '/images/products/monitor.png'
-    ],
-    'tv': [
-        '/images/products/tv1.png'
-    ],
-    'power bank': [
-        '/images/products/powerbank1.png'
-    ],
-    'foam roller': [
-        '/images/products/foamroller1.png'
-    ],
-    'bottle': [
-        '/images/products/bottle1.png'
-    ],
-    'duffel bag': [
-        '/images/products/backpack1.png'
-    ],
-    'tote bag': [
-        '/images/products/backpack1.png'
-    ],
-    'backpack': [
-        '/images/products/backpack1.png'
-    ],
-    'bag': [
-        '/images/products/backpack1.png'
-    ],
-    'laptop': [
-        '/images/products/macbook_pro_14.png'
-    ],
-    'macbook': [
-        '/images/products/macbook_pro_14.png'
-    ],
-    'phone': [
-        '/images/products/iphone_15_pro.png',
-        '/images/products/galaxy_s24_ultra.png'
-    ],
-    'camera': [
-        '/images/products/canon_eos_r5.png'
-    ],
-    'air fryer': [
-        '/images/products/airfryer.png'
-    ],
-    'cookware set': [
-        '/images/products/cookware.png'
-    ],
-    'cookware': [
-        '/images/products/cookware.png'
-    ],
-    'kettle': [
-        '/images/products/kettle.png'
-    ],
-    'coffee maker': [
-        '/images/products/coffeemaker.png'
-    ],
-    'purifier': [
-        '/images/products/purifier.png'
-    ],
-    'kitchen appliance': [
-        '/images/products/airfryer.png'
-    ]
-}
-
-GENERIC_PRODUCT_FALLBACK = [
-    '/images/products/backpack1.png'
-]
-
-def find_image_for_product(name, product_id):
-    """Find matching image URL deterministically, using modulo array access."""
-    s_name = name.lower()
+def get_images_by_category():
+    images_dir = os.path.join('frontend', 'public', 'images', 'products')
+    all_images = os.listdir(images_dir)
     
-    # 1. Product Type Mapping
-    for keyword, url_list in PRODUCT_MAP_LISTS.items():
-        if keyword in s_name:
-            return url_list[product_id % len(url_list)]
+    cat_images = defaultdict(list)
+    
+    for img in all_images:
+        img_lower = img.lower()
+        if 'tv' in img_lower or 'remote' in img_lower or 'usb' in img_lower or 'cable' in img_lower or 'charger' in img_lower or 'laptop' in img_lower or 'macbook' in img_lower or 'monitor' in img_lower or 'power' in img_lower or 'earphone' in img_lower or 'headphone' in img_lower or 'airpod' in img_lower or 'mouse' in img_lower or 'keyboard' in img_lower or 'speaker' in img_lower or 'iphone' in img_lower or 'samsung' in img_lower or 'nokia' in img_lower or 'vivo' in img_lower or 'oppo' in img_lower or 'realme' in img_lower or 'redmi' in img_lower or 'oneplus' in img_lower:
+            cat_images['Electronics'].append(img)
+        elif 'airfryer' in img_lower or 'coffee' in img_lower or 'kettle' in img_lower or 'purifier' in img_lower or 'cookware' in img_lower or 'spice' in img_lower:
+            cat_images['Home Appliances'].append(img)
+        elif 'shirt' in img_lower or 'polo' in img_lower or 'sweater' in img_lower or 'glass' in img_lower or 'earring' in img_lower or 'ring' in img_lower or 'model' in img_lower:
+            cat_images['Fashion'].append(img)
+        elif 'wallet' in img_lower or 'belt' in img_lower or 'watch' in img_lower or 'band' in img_lower or 'rolex' in img_lower or 'casio' in img_lower:
+            cat_images['Accessories'].append(img)
+        elif 'foamroller' in img_lower or 'bottle' in img_lower or 'yoga' in img_lower or 'gym' in img_lower:
+            cat_images['Fitness'].append(img)
+        elif 'football' in img_lower or 'basketball' in img_lower or 'baseball' in img_lower or 'cricket' in img_lower or 'tennis' in img_lower or 'golf' in img_lower or 'shuttlecock' in img_lower or 'volleyball' in img_lower:
+            cat_images['Sports'].append(img)
+        elif 'shoe' in img_lower or 'nike' in img_lower or 'adidas' in img_lower or 'puma' in img_lower or 'boot' in img_lower or 'sneaker' in img_lower or 'slipper' in img_lower or 'trainers' in img_lower or 'new_balance' in img_lower:
+            cat_images['Shoes'].append(img)
+        elif 'bag' in img_lower or 'backpack' in img_lower or 'handbag' in img_lower or 'messenger' in img_lower:
+            cat_images['Bags'].append(img)
+        else:
+            cat_images['Other'].append(img)
             
-    # 2. Generic object fallback
-    return GENERIC_PRODUCT_FALLBACK[product_id % len(GENERIC_PRODUCT_FALLBACK)]
+    # Fallbacks if a category is empty
+    if not cat_images['Gaming']:
+        cat_images['Gaming'] = [img for img in all_images if 'mouse' in img.lower() or 'keyboard' in img.lower()] or ['keyboard1.png']
+    if not cat_images['Fashion']:
+        cat_images['Fashion'] = ['shirt1.png', 'polo.png', 'patagonia_sweater.png']
+        
+    return cat_images
 
-
-def main():
-    conn = mysql.connector.connect(**DB)
+def fix_images():
+    print("Connecting to DB...")
+    conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor(dictionary=True)
-
-    cursor.execute('SELECT id, name, brand, category, image_url FROM products ORDER BY id')
+    
+    cat_images = get_images_by_category()
+    
+    # Shuffle lists to ensure variety when we pop/cycle
+    for k in cat_images:
+        random.shuffle(cat_images[k])
+        print(f"Category {k} has {len(cat_images[k])} images")
+        
+    cursor.execute("SELECT id, name, category, subcategory FROM products")
     products = cursor.fetchall()
-
+    
+    # Track usage to minimize duplication
+    usage_counts = defaultdict(int)
+    
     updates = []
+    
     for p in products:
-        new_url = find_image_for_product(p['name'], p['id'])
-        if new_url != p['image_url']:
+        cat = p['category']
+        subcat = p['subcategory']
+        name = p['name'].lower()
+        
+        # Try to find a specific keyword match first
+        chosen_img = None
+        pool = cat_images.get(cat, [])
+        if not pool:
+            pool = cat_images.get('Other', [])
+            
+        # Select image with minimum usage from the pool
+        pool.sort(key=lambda x: usage_counts[x])
+        if pool:
+            # Maybe pick from the top 3 least used to add randomness
+            top_candidates = pool[:max(1, len(pool)//5)]
+            chosen_img = random.choice(top_candidates)
+            
+        if chosen_img:
+            usage_counts[chosen_img] += 1
+            new_url = f"/images/products/{chosen_img}"
             updates.append((new_url, p['id']))
-
-    if updates:
-        cursor.executemany('UPDATE products SET image_url = %s WHERE id = %s', updates)
-        conn.commit()
-        print(f'Updated {len(updates)} images with deterministic LOCAL list rotation.')
-    else:
-        print('All images already mapped correctly.')
-
+            
+    print(f"Preparing to update {len(updates)} products...")
+    
+    update_query = "UPDATE products SET image_url = %s WHERE id = %s"
+    cursor.executemany(update_query, updates)
+    conn.commit()
+    
+    print("Done! Updated products with local image paths.")
+    
     cursor.close()
     conn.close()
 
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    fix_images()
