@@ -31,23 +31,23 @@ const Products = () => {
                 if (searchQuery) {
                     // Search mode
                     activityTracker.trackSearch(searchQuery);
-                    const res = await axios.get(`http://localhost:5000/api/products/search?q=${encodeURIComponent(searchQuery)}`);
+                    const res = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/search?q=${encodeURIComponent(searchQuery)}`);
                     setProducts(res.data || []);
                     setGroupedProducts({});
                 } else if (activeCategory !== 'All') {
                     // Single category
                     activityTracker.trackCategoryVisit(activeCategory);
-                    const res = await axios.get(`http://localhost:5000/api/products/category/${encodeURIComponent(activeCategory)}`);
+                    const res = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/category/${encodeURIComponent(activeCategory)}`);
                     setProducts(res.data || []);
                     setGroupedProducts({});
                 } else {
                     // All categories — grouped view
-                    const res = await axios.get('http://localhost:5000/api/products/grouped?per_category=8');
+                    const res = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/grouped?per_category=8`);
                     setGroupedProducts(res.data || {});
                     setProducts([]);
                 }
                 // Fetch categories for pills
-                const catRes = await axios.get('http://localhost:5000/api/products/categories');
+                const catRes = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/categories`);
                 setCategories(catRes.data || []);
             } catch (error) {
                 console.error("Error fetching products:", error);

@@ -21,7 +21,7 @@ const ProductDetail = () => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const response = await axios.get(`http://localhost:5000/product/${id}`);
+                const response = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/product/${id}`);
                 const prod = response.data.product || response.data;
                 setProduct(prod);
                 
@@ -29,7 +29,7 @@ const ProductDetail = () => {
                 activityTracker.trackView(id);
 
                 // Fetch related products
-                const relRes = await axios.get(`http://localhost:5000/api/products/related/${id}`);
+                const relRes = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/related/${id}`);
                 setRelatedProducts(relRes.data || []);
             } catch (error) {
                 console.error("Error fetching product details:", error);

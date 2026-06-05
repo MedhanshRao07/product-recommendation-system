@@ -13,7 +13,7 @@ const Cart = () => {
     useEffect(() => {
         if (cart.length > 0) {
             const lastItem = cart[cart.length - 1];
-            axios.get(`http://localhost:5000/api/products/related/${lastItem.id}`)
+            axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/related/${lastItem.id}`)
                 .then(res => setRelatedProducts(res.data.slice(0, 4)))
                 .catch(err => console.error("Error fetching cart recommendations:", err));
         } else {

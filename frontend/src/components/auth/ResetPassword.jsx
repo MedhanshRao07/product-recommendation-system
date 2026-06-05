@@ -40,10 +40,13 @@ const ResetPassword = () => {
         setMessage('');
 
         try {
-            const res = await axios.post('http://localhost:5000/api/auth/reset-password', { 
-                token, 
-                password 
-            });
+            const res = await axios.post(
+  `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/auth/reset-password`,
+  {
+    token,
+    password
+  }
+);
             setMessage(res.data.message);
             setTimeout(() => {
                 navigate('/login');

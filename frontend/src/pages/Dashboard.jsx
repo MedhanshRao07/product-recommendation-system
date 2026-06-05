@@ -27,7 +27,7 @@ const Dashboard = () => {
             const activityLog = JSON.parse(sessionStorage.getItem('activity_log') || '[]');
             const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
             
-            const recRes = await axios.post(`http://localhost:5000/api/products/auto-recommend/${user.id}`, {
+            const recRes = await axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/auto-recommend/${user.id}`, {
                 session_activity: activityLog.slice(-15),
                 cart: cartItems.map(item => item.id)
             });
@@ -45,8 +45,8 @@ const Dashboard = () => {
         const fetchData = async () => {
             try {
                 const [trendingRes, groupedRes] = await Promise.all([
-                    axios.get('http://localhost:5000/api/products/trending'),
-                    axios.get('http://localhost:5000/api/products/grouped?per_category=6'),
+                    axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/trending`),
+                    axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/grouped?per_category=6`),
                 ]);
                 setTrending(trendingRes.data || []);
                 setGroupedProducts(groupedRes.data || {});

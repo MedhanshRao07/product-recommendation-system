@@ -2,7 +2,7 @@ import axios from 'axios';
 import { getToken } from '../utils/auth';
 
 // Ideally this comes from an environment variable (e.g. process.env.REACT_APP_API_URL)
-const API_URL = 'http://localhost:5000/api/auth';
+const API_URL = `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/auth`;
 
 const login = async (email, password) => {
     console.log(`authService.js: Initiating login POST request to ${API_URL}/login for user ${email}`);

@@ -27,7 +27,7 @@ const Navbar = () => {
         window.addEventListener('authChange', handleAuthChange);
 
         // Fetch categories
-        axios.get('http://localhost:5000/api/products/categories')
+        axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/categories`)
             .then(res => setCategories(res.data || []))
             .catch(() => {});
 

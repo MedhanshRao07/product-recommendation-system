@@ -640,10 +640,13 @@ class ProductService:
                 category_scores[item['category']] += weight
                 brand_scores[item['brand']] += weight
                 
-            # 3. Dominant Category Detection
-            dominant_category = None
-            if category_scores:
-                dominant_category = max(category_scores.items(), key=lambda x: x[1])[0]
+            # 3. Interest Profile Detection
+            total_cat_score = sum(category_scores.values()) or 1
+            sorted_cats = sorted(category_scores.items(), key=lambda x: x[1], reverse=True)
+            dominant_category = sorted_cats[0][0] if sorted_cats else None
+            
+            # Secondary interests: Categories the user explicitly engaged with, >5% of total interest
+            secondary_categories = set(cat for cat, score in sorted_cats[1:] if (score / total_cat_score) > 0.05)
                 
             # 4. TF-IDF + Collaborative Filtering Candidates
             candidates = []
@@ -739,8 +742,10 @@ class ProductService:
             }
             
             dominant_pool = []
-            related_pool = []
-            unrelated_pool = []
+            secondary_pool = []
+            exploration_pool = []
+            
+            related_categories = set(related_map.get(dominant_category, []))
             
             for c in candidates:
                 # Base scoring (Now includes TF-IDF)
@@ -751,43 +756,65 @@ class ProductService:
                 brand_score = brand_scores.get(c['brand'], 0) / (max_brand or 1)
                 popularity = (c.get('rating', 0) or 0) / max_rating
                 
-                final_score = (0.30 * collab_score) + (0.30 * tfidf_score) + (0.20 * brand_score) + (0.20 * popularity)
+                cat_match_score = category_scores.get(c['category'], 0) / (sum(category_scores.values()) or 1)
+                
+                final_score = (0.25 * collab_score) + (0.25 * tfidf_score) + (0.20 * cat_match_score) + (0.15 * brand_score) + (0.15 * popularity)
                 c['base_score'] = final_score
                 
                 # Assign to pools and generate strict labels
-                if dominant_category and c['category'] == dominant_category:
+                cat = c['category']
+                if dominant_category and cat == dominant_category:
                     if float(c['price'] or 0) > 400:
                         c['recommendation_reason'] = f"Premium {dominant_category}"
                     else:
                         c['recommendation_reason'] = f"Because you explored {dominant_category}"
                     dominant_pool.append(c)
-                elif dominant_category and c['category'] in related_map.get(dominant_category, []):
-                    c['recommendation_reason'] = f"Trending in {c['category']}"
-                    related_pool.append(c)
+                elif cat in secondary_categories:
+                    c['recommendation_reason'] = f"Based on your interest in {cat}"
+                    secondary_pool.append(c)
+                elif cat in related_categories:
+                    c['recommendation_reason'] = f"Trending in {cat}"
+                    exploration_pool.append(c)
                 else:
                     c['recommendation_reason'] = "Popular choice"
-                    unrelated_pool.append(c)
+                    # Only add highly popular or highly collaborative items to exploration to avoid noise
+                    if popularity > 0.8 or collab_score > 0.5:
+                        exploration_pool.append(c)
                     
             # Sort each pool by base quality
             dominant_pool.sort(key=lambda x: x['base_score'], reverse=True)
-            related_pool.sort(key=lambda x: x['base_score'], reverse=True)
-            unrelated_pool.sort(key=lambda x: x['base_score'], reverse=True)
+            secondary_pool.sort(key=lambda x: x['base_score'], reverse=True)
+            exploration_pool.sort(key=lambda x: x['base_score'], reverse=True)
             
-            # 5. Controlled Diversity & Strict Limiting
+            # 5. Controlled Diversity (70% dominant, 20% secondary, 10% exploration)
             final_selection = []
             if dominant_category:
-                # Enforce: 8 dominant, 3 related, 1 unrelated (Max 12)
-                dom_count = min(len(dominant_pool), 8)
-                rel_count = min(len(related_pool), 3)
-                unrel_count = min(len(unrelated_pool), 1)
+                dom_target = 8
+                sec_target = 3
+                exp_target = 1
                 
-                # If short on dominant, pad with related
-                if dom_count < 8:
-                    rel_count = min(len(related_pool), 3 + (8 - dom_count))
+                # Dynamic cascading if pools are short
+                sec_count = min(len(secondary_pool), sec_target)
+                if sec_count < sec_target:
+                    exp_target += (sec_target - sec_count)
+                    
+                exp_count = min(len(exploration_pool), exp_target)
+                if exp_count < exp_target:
+                    dom_target += (exp_target - exp_count)
+                    
+                dom_count = min(len(dominant_pool), dom_target)
+                if dom_count < dom_target:
+                    shortfall = dom_target - dom_count
+                    extra_sec = min(len(secondary_pool) - sec_count, shortfall)
+                    sec_count += extra_sec
+                    shortfall -= extra_sec
+                    
+                    extra_exp = min(len(exploration_pool) - exp_count, shortfall)
+                    exp_count += extra_exp
                     
                 final_selection.extend(dominant_pool[:dom_count])
-                final_selection.extend(related_pool[:rel_count])
-                final_selection.extend(unrelated_pool[:unrel_count])
+                final_selection.extend(secondary_pool[:sec_count])
+                final_selection.extend(exploration_pool[:exp_count])
             else:
                 final_selection = sorted(candidates, key=lambda x: x['base_score'], reverse=True)[:12]
                 

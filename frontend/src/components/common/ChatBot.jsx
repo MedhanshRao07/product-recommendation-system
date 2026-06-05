@@ -46,7 +46,7 @@ const ChatBot = () => {
       const activityLog = JSON.parse(sessionStorage.getItem('activity_log') || '[]');
       const recentContext = activityLog.slice(-10); // Last 10 actions
       
-      const response = await axios.post('http://localhost:5000/api/chat', {
+      const response = await axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/chat`, {
         message: userText,
         history: history,
         context: recentContext

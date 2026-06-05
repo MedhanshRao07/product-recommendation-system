@@ -21,12 +21,12 @@ const Recommendations = () => {
                     const activityLog = JSON.parse(sessionStorage.getItem('activity_log') || '[]');
                     const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
                     
-                    response = await axios.post(`http://localhost:5000/api/products/auto-recommend/${currentUser.id}`, {
+                    response = await axios.post(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products/auto-recommend/${currentUser.id}`, {
                         session_activity: activityLog.slice(-15),
                         cart: cartItems.map(item => item.id)
                     });
                 } else {
-                    response = await axios.get('http://localhost:5000/api/products');
+                    response = await axios.get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/products`);
                 }
 
                 if (response.data && response.data.recommendations) {

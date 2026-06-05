@@ -277,8 +277,25 @@ class TFIDFRecommender:
                 # 2. Get blended popularity score
                 raw_pop, pop_blend = self.popularity_recommender.get_score(pid, self.product_data.get(pid))
                 
-                # Blend TF-IDF with popularity for the multi-product case
-                final = 0.70 * avg_tfidf + 0.30 * pop_blend
+                # 3. Calculate category match against history
+                candidate_cat = self.product_data.get(pid, {}).get('category')
+                cat_match = 0.0
+                for vid in valid_ids:
+                    if self.product_data.get(vid, {}).get('category') == candidate_cat:
+                        cat_match += 1.0
+                cat_score = cat_match / len(valid_ids) if valid_ids else 0.0
+                
+                # 4. Calculate brand match against history
+                candidate_brand = self.product_data.get(pid, {}).get('brand')
+                brand_match = 0.0
+                if candidate_brand:
+                    for vid in valid_ids:
+                        if self.product_data.get(vid, {}).get('brand') == candidate_brand:
+                            brand_match += 1.0
+                brand_score = brand_match / len(valid_ids) if valid_ids else 0.0
+                
+                # Blend TF-IDF with category, brand, and popularity
+                final = 0.40 * avg_tfidf + 0.30 * cat_score + 0.15 * pop_blend + 0.15 * brand_score
                 scored.append((pid, final))
 
             scored.sort(key=lambda x: x[1], reverse=True)

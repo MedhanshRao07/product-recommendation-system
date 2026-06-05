@@ -15,8 +15,10 @@ const ForgotPassword = () => {
         setMessage('');
 
         try {
-            const res = await axios.post('http://localhost:5000/api/auth/forgot-password', { email });
-            setMessage(res.data.message);
+            const res = await axios.post(
+  `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}/api/auth/forgot-password`,
+  { email }
+);
             // In a real scenario, an email is sent. For demo, we might want to log the token or show it.
             if (res.data.reset_token) {
                 console.log("DEMO MODE - Reset Token:", res.data.reset_token);
