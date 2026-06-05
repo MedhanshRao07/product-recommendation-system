@@ -1,0 +1,94 @@
+# ==============================================================================
+# Python & Flask Backend
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Flask & Python Caches
+.pytest_cache/
+.coverage
+instance/
+pip-log.txt
+
+# ==============================================================================
+# Node.js & React Frontend
+# ==============================================================================
+node_modules/
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output directories
+build/
+dist/
+
+# ==============================================================================
+# Recommendation System & Datasets
+# ==============================================================================
+# Important: We DO NOT globally ignore .csv, .tsv, or ML models (.pkl, .pth)
+# because they may be required for the recommendation system to run in deployment.
+# Only ignore specific large/generated datasets or models that exceed Git limits (100MB).
+# Examples of how to safely ignore specific large files/folders:
+# /datasets/generated_large_data.csv
+# /models/large_model.pth
+# /data/temp/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ==============================================================================
+# Secrets & Environment Variables
+# ==============================================================================
+# Core environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# API keys and credentials
+*.pem
+*.key
+client_secret.json
+credentials.json
+
+# ==============================================================================
+# Logs
+# ==============================================================================
+*.log
+logs/
+
+# ==============================================================================
+# OS & IDE Junk
+# ==============================================================================
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ==============================================================================
+# Explicitly ALLOWED files (Exceptions)
+# ==============================================================================
+!.env.example
+!requirements.txt
+!package.json
+!README.md
