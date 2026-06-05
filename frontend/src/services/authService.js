@@ -27,8 +27,11 @@ const register = async (name, email, password) => {
 };
 
 const logout = () => {
-    localStorage.removeItem('user');
-    window.dispatchEvent(new Event('authChange'));
+    const hasUser = localStorage.getItem('user');
+    if (hasUser) {
+        localStorage.removeItem('user');
+        window.dispatchEvent(new Event('authChange'));
+    }
 };
 
 const getCurrentUser = async () => {
@@ -56,7 +59,7 @@ const getCurrentUser = async () => {
         console.error("Auth fetch error:", error.response?.status);
         if (error.response && error.response.status === 401) {
             logout();
-            window.location.href = '/login';
+            // We removed window.location.href here to allow React Router to handle redirects
         }
         throw error;
     }

@@ -48,6 +48,9 @@ const track = async (action, productId = null, metadata = {}) => {
     // Keep last 200 entries
     if (log.length > 200) log.splice(0, log.length - 200);
     sessionStorage.setItem('activity_log', JSON.stringify(log));
+
+    // Dispatch event so UI can dynamically refresh recommendations
+    window.dispatchEvent(new CustomEvent('activityTracked', { detail: { action, productId } }));
   } catch (e) {
     // Silent fail — don't interrupt UX
   }

@@ -1,21 +1,13 @@
 from ..database.db_connection import get_connection as get_db_connection
+import logging
+import math
+from collections import defaultdict
 
-# ─── TF-IDF ML Recommender Import ──────────────────────────────────────────
-# Import the content-based recommendation engine (TF-IDF + Cosine Similarity).
-# This is used to enhance recommendations with machine learning.
-# If import fails (e.g., scikit-learn not installed), we gracefully degrade.
-try:
-    from ..recommendation.engine import get_recommender
-    from ..recommendation.collaborative import get_collaborative_filter
-    import logging
+logger = logging.getLogger('suggestify.product_service')
 
-    logger = logging.getLogger('suggestify.product_service')
-    _ML_AVAILABLE = True
-    print("[ProductService] ML recommenders loaded successfully")
-except ImportError as e:
-    _ML_AVAILABLE = False
-    print(f"[ProductService] ML recommenders not available: {e}")
-    print("[ProductService] Falling back to behavior-only recommendations")
+# Phase 3: Lightweight Recommendation Engine
+# Removed heavy ML dependencies (scikit-learn) in favor of optimized hybrid scoring
+_ML_AVAILABLE = False
 
 class ProductService:
     @staticmethod
@@ -443,321 +435,239 @@ class ProductService:
     @staticmethod
     def get_auto_recommendations(user_id):
         """
-        Hybrid recommendation engine (Behavior + ML + Popularity):
-        
-        ORIGINAL LOGIC (preserved):
-        1. Multi-category affinity — weights user's top 3 interacted categories
-        2. Recency bias — recent interactions count more
-        3. Excludes heavily-seen products
-        4. Popularity fallback for cold-start users
-        
-        NEW ML LAYER (added on top):
-        5. TF-IDF cosine similarity — re-ranks candidates based on content
-           similarity to products the user has actually interacted with
-        6. Hybrid scoring formula:
-           final_score = (0.5 × behavior) + (0.3 × similarity) + (0.2 × popularity)
-        7. If ML fails, returns the original behavior-only results (safe fallback)
+        Highly Adaptive Recommendation Engine:
+        Strictly limits unrelated products to 1-2 items maximum.
+        Forces homepage to heavily shift toward the dominant category.
+        Uses action weights (view=1, wishlist=3, add_to_cart=5, purchase=10) and time decay.
         """
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
             
-            # ── Step 1: Get user's category affinities with action weights ──
-            # Add to Cart = 5, Compare = 2, View/Click = 1
-            # Recent interactions (today) count 3x, last week 2x, older 1x
-            affinity_query = """
-                SELECT p.category, 
-                       COUNT(*) as interaction_count,
-                       SUM(
-                           (CASE 
-                               WHEN ua.action = 'add_to_cart' THEN 5
-                               WHEN ua.action = 'cart' THEN 5
-                               WHEN ua.action = 'compare' THEN 2
-                               ELSE 1
-                           END) *
-                           (CASE 
-                               WHEN ua.created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY) THEN 3
-                               WHEN ua.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 2
-                               ELSE 1
-                           END)
-                       ) as weighted_score
+            # 1. Fetch user's recent history with actions to understand context
+            cursor.execute("""
+                SELECT p.id, p.category, p.brand, p.name, p.price, ua.action, ua.created_at
                 FROM user_activity ua
                 JOIN products p ON ua.product_id = p.id
                 WHERE ua.user_id = %s
-                GROUP BY p.category
-                ORDER BY weighted_score DESC
-                LIMIT 3
-            """
-            cursor.execute(affinity_query, (user_id,))
-            affinities = cursor.fetchall()
-            
-            if not affinities:
-                # Cold-start: return popular products across all categories
-                logger.info(f"[Auto-Recommend] User {user_id} has no affinity, using trending fallback")
-                cursor.execute("""
-                    SELECT id, name, price, rating, image_url, description, brand, category
-                    FROM products
-                    ORDER BY rating DESC
-                    LIMIT 30
-                """)
-                return ProductService.filter_valid_products(cursor.fetchall())[:12]
-            
-            # ── Step 2: Get products the user has interacted with heavily ──
-            cursor.execute("""
-                SELECT product_id, COUNT(*) as cnt
-                FROM user_activity 
-                WHERE user_id = %s
-                GROUP BY product_id
-                HAVING cnt >= 3
+                ORDER BY ua.created_at DESC
+                LIMIT 50
             """, (user_id,))
-            excluded_ids = [row['product_id'] for row in cursor.fetchall()]
+            history = cursor.fetchall()
             
-            # ── Step 3: Fetch candidate products from top categories ──
-            # (weighted distribution based on category affinity scores)
-            recommendations = []
-            total_weight = sum(a['weighted_score'] for a in affinities)
+            history_ids = set(row['id'] for row in history)
+            latest_viewed = history[0] if history else None
             
-            for affinity in affinities:
-                cat = affinity['category']
-                weight = affinity['weighted_score']
-                # Allocate slots proportional to affinity weight (min 2, total ~12)
-                slots = max(2, round(12 * weight / total_weight))
+            # 2. Action weights & Time Decay
+            action_weights = {
+                'view': 1,
+                'click': 1,
+                'wishlist': 3,
+                'add_to_cart': 5,
+                'cart': 5,
+                'purchase': 10
+            }
+            
+            category_scores = defaultdict(float)
+            brand_scores = defaultdict(float)
+            
+            for idx, item in enumerate(history):
+                # Strong time decay: last 15 items matter massively
+                decay = max(0.1, 1.0 - (idx / 15.0))
+                action_w = action_weights.get(item['action'], 1)
+                weight = decay * action_w
                 
-                if excluded_ids:
-                    placeholders = ','.join(['%s'] * len(excluded_ids))
-                    cursor.execute(f"""
-                        SELECT id, name, price, rating, image_url, description, brand, category
-                        FROM products
-                        WHERE category = %s AND id NOT IN ({placeholders})
-                        ORDER BY rating DESC
-                        LIMIT %s
-                    """, (cat, *excluded_ids, slots))
+                category_scores[item['category']] += weight
+                brand_scores[item['brand']] += weight
+                
+            # 3. Dominant Category Detection
+            dominant_category = None
+            if category_scores:
+                dominant_category = max(category_scores.items(), key=lambda x: x[1])[0]
+                
+            # 4. Collaborative Filtering Candidates
+            candidates = []
+            if history_ids:
+                placeholders = ','.join(['%s'] * len(history_ids))
+                cursor.execute(f"""
+                    SELECT p.id, p.category, p.brand, p.name, p.rating, p.price, COUNT(*) as collab_weight
+                    FROM user_activity ua
+                    JOIN products p ON ua.product_id = p.id
+                    WHERE ua.user_id IN (
+                        SELECT DISTINCT user_id FROM user_activity WHERE product_id IN ({placeholders}) AND user_id != %s
+                    )
+                    AND p.id NOT IN ({placeholders})
+                    GROUP BY p.id
+                    ORDER BY collab_weight DESC
+                    LIMIT 300
+                """, (*list(history_ids), user_id, *list(history_ids)))
+                candidates = cursor.fetchall()
+            
+            if not candidates:
+                cursor.execute("SELECT id, category, brand, name, rating, price, image_url FROM products ORDER BY rating DESC LIMIT 100")
+                candidates = cursor.fetchall()
+                # Cold start: if no history, forcefully categorize the candidates to create sections
+                if not history_ids:
+                    for i, c in enumerate(candidates[:12]):
+                        if i < 4:
+                            c['recommendation_reason'] = "Trending Now"
+                            c['base_score'] = 1.0 - (i * 0.01)
+                        elif i < 8:
+                            c['recommendation_reason'] = f"Popular in {c['category']}"
+                            c['base_score'] = 0.8 - (i * 0.01)
+                        else:
+                            c['recommendation_reason'] = "Staff Picks"
+                            c['base_score'] = 0.6 - (i * 0.01)
+                    return candidates[:12]
+                
+            max_collab = max((c.get('collab_weight', 0) for c in candidates), default=1) or 1
+            max_rating = max((c.get('rating', 0) or 0 for c in candidates), default=5.0) or 5.0
+            
+            related_map = {
+                'Electronics': ['Headphones', 'Accessories', 'Watches'],
+                'Headphones': ['Electronics', 'Accessories'],
+                'Fitness': ['Shoes', 'Accessories'],
+                'Shoes': ['Fitness', 'Bags'],
+                'Watches': ['Accessories', 'Bags', 'Electronics'],
+                'Bags': ['Watches', 'Accessories', 'Shoes'],
+                'Accessories': ['Watches', 'Bags', 'Electronics']
+            }
+            
+            dominant_pool = []
+            related_pool = []
+            unrelated_pool = []
+            
+            for c in candidates:
+                # Base scoring
+                collab_score = c.get('collab_weight', 0) / max_collab
+                max_brand = max(brand_scores.values()) if brand_scores else 1
+                brand_score = brand_scores.get(c['brand'], 0) / (max_brand or 1)
+                popularity = (c.get('rating', 0) or 0) / max_rating
+                
+                final_score = (0.40 * collab_score) + (0.30 * brand_score) + (0.30 * popularity)
+                c['base_score'] = final_score
+                
+                # Assign to pools and generate strict labels
+                if dominant_category and c['category'] == dominant_category:
+                    if float(c['price'] or 0) > 400:
+                        c['recommendation_reason'] = f"Premium {dominant_category}"
+                    else:
+                        c['recommendation_reason'] = f"Because you explored {dominant_category}"
+                    dominant_pool.append(c)
+                elif dominant_category and c['category'] in related_map.get(dominant_category, []):
+                    c['recommendation_reason'] = f"Trending in {c['category']}"
+                    related_pool.append(c)
                 else:
-                    cursor.execute("""
-                        SELECT id, name, price, rating, image_url, description, brand, category
-                        FROM products
-                        WHERE category = %s
-                        ORDER BY rating DESC
-                        LIMIT %s
-                    """, (cat, slots))
-                
-                recommendations.extend(cursor.fetchall())
+                    c['recommendation_reason'] = "Popular choice"
+                    unrelated_pool.append(c)
+                    
+            # Sort each pool by base quality
+            dominant_pool.sort(key=lambda x: x['base_score'], reverse=True)
+            related_pool.sort(key=lambda x: x['base_score'], reverse=True)
+            unrelated_pool.sort(key=lambda x: x['base_score'], reverse=True)
             
-            # ── Step 4: Deduplicate ──
-            seen_ids = set()
-            unique_recs = []
-            for rec in recommendations:
-                if rec['id'] not in seen_ids:
-                    seen_ids.add(rec['id'])
-                    unique_recs.append(rec)
-            
-            # ── Step 5 (NEW): Merged ML Re-ranking ──
-            if _ML_AVAILABLE and unique_recs:
-                try:
-                    recommender = get_recommender()
-                    collab_filter = get_collaborative_filter()
-                    
-                    # Get user's interaction history (recent 20)
-                    cursor.execute("""
-                        SELECT DISTINCT product_id 
-                        FROM user_activity 
-                        WHERE user_id = %s
-                        ORDER BY created_at DESC
-                        LIMIT 20
-                    """, (user_id,))
-                    user_history_ids = [row['product_id'] for row in cursor.fetchall()]
-                    
-                    # Fetch latest viewed product name for dynamic labels
-                    latest_viewed_name = None
-                    if user_history_ids:
-                        cursor.execute("SELECT name FROM products WHERE id = %s", (user_history_ids[0],))
-                        row = cursor.fetchone()
-                        if row:
-                            latest_viewed_name = row['name']
-                    
-                    if user_history_ids:
-                        # 1. Get Collaborative Filtering scores
-                        cf_results = collab_filter.get_collaborative_recommendations(
-                            product_ids=user_history_ids,
-                            exclude_ids=set(excluded_ids),
-                            top_n=100
-                        )
-                        cf_score_map = {pid: score for pid, score in cf_results}
-                        max_cf = max(cf_score_map.values()) if cf_score_map else 1.0
-                        if max_cf > 0:
-                            cf_score_map = {k: v/max_cf for k, v in cf_score_map.items()}
-
-                        # 2. Get Hybrid Content-based scores
-                        ml_scores = recommender.get_similar_to_multiple(
-                            user_history_ids, top_n=100
-                        )
-                        ml_score_map = {pid: score for pid, score in ml_scores}
-                        
-                        max_rating = max((r.get('rating', 0) or 0) for r in unique_recs) or 5.0
-                        
-                        # 3. Hybrid Scoring Formula
-                        # We evaluate the behavior candidates (unique_recs) but also add top ML candidates
-                        candidate_pool = {rec['id']: rec for rec in unique_recs}
-                        
-                        # Add top CF/ML items to candidate pool if missing
-                        for pid in list(cf_score_map.keys())[:5] + list(ml_score_map.keys())[:5]:
-                            if pid not in candidate_pool and pid not in excluded_ids:
-                                cursor.execute("SELECT id, name, price, rating, image_url, description, brand, category FROM products WHERE id = %s", (pid,))
-                                prod = cursor.fetchone()
-                                if prod:
-                                    candidate_pool[pid] = prod
-                        
-                        scored_recs = []
-                        for pid, rec in candidate_pool.items():
-                            # Behavior score (only if in original unique_recs)
-                            behavior_score = 0.0
-                            for rank, orig_rec in enumerate(unique_recs):
-                                if orig_rec['id'] == pid:
-                                    behavior_score = 1.0 - (rank / max(len(unique_recs), 1))
-                                    break
-                            
-                            similarity_score = ml_score_map.get(pid, 0.0)
-                            collab_score = cf_score_map.get(pid, 0.0)
-                            popularity_score = (rec.get('rating', 0) or 0) / max_rating
-                            
-                            # Final Hybrid Score (Ensemble)
-                            final_score = (
-                                0.40 * behavior_score +
-                                0.30 * similarity_score +
-                                0.15 * collab_score +
-                                0.15 * popularity_score
-                            )
-                            
-                            # Assign intelligent recommendation label
-                            reason = "Top pick for you"
-                            if similarity_score > 0.4 and similarity_score > collab_score and latest_viewed_name:
-                                # Keep label short by truncating name if needed
-                                short_name = latest_viewed_name[:20] + '...' if len(latest_viewed_name) > 20 else latest_viewed_name
-                                reason = f"Because you viewed {short_name}"
-                            elif collab_score > 0.4 and collab_score > similarity_score:
-                                reason = "People also viewed"
-                            elif behavior_score > 0.6:
-                                reason = f"Trending in {rec.get('category', 'your interests')}"
-                            elif popularity_score > 0.8:
-                                reason = "Highly rated"
-                                
-                            rec['recommendation_reason'] = reason
-                            
-                            scored_recs.append((rec, final_score))
-                        
-                        scored_recs.sort(key=lambda x: x[1], reverse=True)
-                        unique_recs = [rec for rec, score in scored_recs]
-                        
-                        print(f"[Hybrid] Merged {len(unique_recs)} recommendations for user {user_id}")
-                        logger.info(f"[Auto-Recommend] Source: ML Hybrid, Count: {len(unique_recs)}")
+            # 5. Controlled Diversity & Strict Limiting
+            final_selection = []
+            if dominant_category:
+                # Enforce: 8 dominant, 3 related, 1 unrelated (Max 12)
+                dom_count = min(len(dominant_pool), 8)
+                rel_count = min(len(related_pool), 3)
+                unrel_count = min(len(unrelated_pool), 1)
                 
-                except Exception as ml_error:
-                    print(f"[Hybrid] ML re-ranking failed (using behavior-only): {ml_error}")
-                    logger.info(f"[Auto-Recommend] Source: Behavior Only, Count: {len(unique_recs)}")
+                # If short on dominant, pad with related
+                if dom_count < 8:
+                    rel_count = min(len(related_pool), 3 + (8 - dom_count))
+                    
+                final_selection.extend(dominant_pool[:dom_count])
+                final_selection.extend(related_pool[:rel_count])
+                final_selection.extend(unrelated_pool[:unrel_count])
             else:
-                logger.info(f"[Auto-Recommend] Source: Behavior Only, Count: {len(unique_recs)}")
+                final_selection = sorted(candidates, key=lambda x: x['base_score'], reverse=True)[:12]
+                
+            top_ids = [c['id'] for c in final_selection[:12]]
             
-            # Apply safety validation
-            valid_recs = ProductService.filter_valid_products(unique_recs)
+            if not top_ids:
+                return []
+                
+            # 6. Fetch final full details and retain sorted order
+            placeholders = ','.join(['%s'] * len(top_ids))
+            cursor.execute(f"SELECT * FROM products WHERE id IN ({placeholders})", top_ids)
+            final_products = ProductService.filter_valid_products(cursor.fetchall())
             
-            # Default labels if not set by ML (fallback)
-            for rec in valid_recs:
-                if 'recommendation_reason' not in rec:
-                    rec['recommendation_reason'] = f"Trending in {rec.get('category', 'your interests')}"
-            
-            # Fallback if we filtered out too many
-            if len(valid_recs) < 4:
-                logger.warning(f"[Auto-Recommend] Too few valid recommendations ({len(valid_recs)}), fetching trending.")
-                trending = ProductService.get_trending_products(12)
-                for t in trending:
-                    if t['id'] not in [v['id'] for v in valid_recs]:
-                        t['recommendation_reason'] = "Popular choice"
-                        valid_recs.append(t)
-            
-            return valid_recs[:12]
+            ordered_products = []
+            for sc in final_selection:
+                for fp in final_products:
+                    if fp['id'] == sc['id']:
+                        fp['recommendation_reason'] = sc['recommendation_reason']
+                        ordered_products.append(fp)
+                        break
+                        
+            return ordered_products
             
         except Exception as e:
-            print(f"Error in auto recommendations: {e}")
+            logger.error(f"Error in auto recommendations: {e}")
             return []
         finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals() and conn is not None and conn.is_connected():
-                conn.close()
+            if 'cursor' in locals(): cursor.close()
+            if 'conn' in locals() and conn.is_connected(): conn.close()
 
     @staticmethod
     def get_related_products(product_id, limit=6):
         """
-        Get related products using ML cosine similarity + category fallback.
-        
-        ENHANCED LOGIC:
-        1. First, try TF-IDF cosine similarity to find truly similar products
-           (e.g., "Nike Hiking Boots" → "Adidas Hiking Boots", not just any Nike product)
-        2. If ML is unavailable or returns too few results, fall back to 
-           same-category products sorted by rating (original behavior)
+        Lightweight related products using strict category affinity.
         """
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
             
-            # ── Try ML-based related products first ──
-            if _ML_AVAILABLE:
-                try:
-                    recommender = get_recommender()
-                    similar = recommender.get_similar_products(product_id, top_n=limit)
-                    
-                    if similar and len(similar) >= limit:
-                        # Fetch full product details for the similar product IDs
-                        similar_ids = [pid for pid, score in similar]
-                        placeholders = ','.join(['%s'] * len(similar_ids))
-                        cursor.execute(f"""
-                            SELECT id, name, price, rating, image_url, brand, category
-                            FROM products
-                            WHERE id IN ({placeholders})
-                        """, similar_ids)
-                        
-                        products = cursor.fetchall()
-                        
-                        # Re-sort by the ML similarity order (not DB order)
-                        id_to_product = {p['id']: p for p in products}
-                        sorted_products = [id_to_product[pid] for pid in similar_ids if pid in id_to_product]
-                        
-                        if sorted_products:
-                            valid_sorted = ProductService.filter_valid_products(sorted_products)
-                            if len(valid_sorted) >= 3:
-                                logger.info(f"[Related] Source: ML Hybrid, Count: {len(valid_sorted)} for product {product_id}")
-                                return valid_sorted[:limit]
-                
-                except Exception as ml_error:
-                    print(f"[ML Related] ML fallback for product {product_id}: {ml_error}")
-            
-            # ── Fallback: same-category products sorted by rating (original logic) ──
-            logger.info(f"[Related] Stage 1 (ML) failed/insufficient. Falling back to same-category for product {product_id}")
-            cursor.execute("SELECT category FROM products WHERE id = %s", (product_id,))
+            cursor.execute("SELECT category, brand FROM products WHERE id = %s", (product_id,))
             row = cursor.fetchone()
             if not row:
                 return []
+                
+            cat = row['category']
+            brand = row['brand']
             
+            # Related category relationships
+            related_map = {
+                'Electronics': ['Headphones', 'Accessories', 'Watches'],
+                'Headphones': ['Electronics', 'Accessories'],
+                'Fitness': ['Shoes', 'Accessories'],
+                'Shoes': ['Fitness', 'Bags'],
+                'Watches': ['Accessories', 'Bags', 'Electronics'],
+                'Bags': ['Watches', 'Accessories', 'Shoes'],
+                'Accessories': ['Watches', 'Bags', 'Electronics']
+            }
+            related_cats = related_map.get(cat, [])
+            
+            # Get candidates
             cursor.execute("""
                 SELECT id, name, price, rating, image_url, brand, category
                 FROM products
-                WHERE category = %s AND id != %s
+                WHERE id != %s AND (category = %s OR category IN (%s))
                 ORDER BY rating DESC
-                LIMIT %s
-            """, (row['category'], product_id, limit * 2))
+                LIMIT 50
+            """ % ("%s", "%s", ','.join(['%s']*len(related_cats)) if related_cats else "''"), 
+            (product_id, cat, *related_cats))
             
-            fallback_prods = ProductService.filter_valid_products(cursor.fetchall())
-            if fallback_prods:
-                logger.info(f"[Related] Source: Category Fallback, Count: {len(fallback_prods)} for product {product_id}")
-                return fallback_prods[:limit]
+            candidates = cursor.fetchall()
             
-            logger.info(f"[Related] Category Fallback empty. Returning trending.")
-            return ProductService.get_trending_products(limit)
+            for c in candidates:
+                # Same brand bonus
+                score = 0
+                if c['category'] == cat: score += 5
+                elif c['category'] in related_cats: score += 2
+                if c['brand'] == brand: score += 3
+                score += (c.get('rating', 0) or 0) / 5.0
+                c['sim_score'] = score
+                c['recommendation_reason'] = "Similar product"
+                
+            candidates.sort(key=lambda x: x['sim_score'], reverse=True)
+            return ProductService.filter_valid_products(candidates)[:limit]
+            
         except Exception as e:
-            print(f"Error fetching related products: {e}")
+            logger.error(f"Error fetching related products: {e}")
             return []
         finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals() and conn is not None and conn.is_connected():
-                conn.close()
+            if 'cursor' in locals(): cursor.close()
+            if 'conn' in locals() and conn.is_connected(): conn.close()

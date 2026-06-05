@@ -65,3 +65,28 @@ def get_me():
             cursor.close()
         if 'conn' in locals() and conn.is_connected():
             conn.close()
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    data = request.get_json()
+    email = data.get('email')
+    if not email:
+        return jsonify({'success': False, 'error': 'Email is required'}), 400
+        
+    response, status_code = AuthService.forgot_password(email)
+    return jsonify(response), status_code
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    data = request.get_json()
+    token = data.get('token')
+    new_password = data.get('password')
+    
+    if not token or not new_password:
+        return jsonify({'success': False, 'error': 'Token and new password are required'}), 400
+        
+    if len(new_password) < 6:
+        return jsonify({'success': False, 'error': 'Password must be at least 6 characters long'}), 400
+        
+    response, status_code = AuthService.reset_password(token, new_password)
+    return jsonify(response), status_code

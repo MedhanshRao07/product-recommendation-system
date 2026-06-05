@@ -55,6 +55,8 @@ def seed_products(cursor, conn):
             brand VARCHAR(100),
             price FLOAT NOT NULL,
             rating FLOAT DEFAULT 0,
+            review_count INT DEFAULT 0,
+            color VARCHAR(50),
             image_url TEXT,
             description TEXT,
             tags VARCHAR(500),
@@ -76,8 +78,8 @@ def seed_products(cursor, conn):
         rows = list(reader)
 
     insert_sql = """
-        INSERT INTO products (id, name, category, brand, price, rating, image_url, description, tags, features, amazon_url, flipkart_url, myntra_url, price_range)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO products (id, name, category, brand, price, rating, review_count, color, image_url, description, tags, features, amazon_url, flipkart_url, myntra_url, price_range)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     batch = []
@@ -89,6 +91,8 @@ def seed_products(cursor, conn):
             row['brand'],
             float(row['price']),
             float(row['rating']),
+            int(row.get('review_count', 0)),
+            row.get('color', ''),
             row['image_url'],
             row['description'],
             row.get('tags', ''),

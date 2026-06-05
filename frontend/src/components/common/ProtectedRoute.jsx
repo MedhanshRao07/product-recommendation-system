@@ -1,26 +1,18 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
 const ProtectedRoute = ({ children }) => {
-    // Check if unexpired JWT exists in localStorage
-    const userStr = localStorage.getItem('user');
+    const { user, loading } = useAuth();
 
-    if (!userStr) {
-        // No user -> redirect to Login
+    if (loading) {
+        return null; // Handled by AuthContext global loading state
+    }
+
+    if (!user) {
         return <Navigate to="/login" replace />;
     }
 
-    try {
-        const user = JSON.parse(userStr);
-        if (!user || !user.access_token) {
-            return <Navigate to="/login" replace />;
-        }
-        // E.g. later you could check token expiration here
-    } catch (err) {
-        return <Navigate to="/login" replace />;
-    }
-
-    // User is authenticated
     return children;
 };
 
