@@ -190,6 +190,59 @@ class ProductService:
         return valid_products
 
     @staticmethod
+    def diversify_feed(products, limit=None):
+        """Greedily select products to maximize feed diversity and prevent adjacent duplicates."""
+        if not products:
+            return []
+            
+        diversified = []
+        recent_images = []
+        recent_subcats = []
+        
+        pool = list(products)
+        
+        while pool and (limit is None or len(diversified) < limit):
+            best_idx = 0
+            best_score = -9999
+            
+            for i, p in enumerate(pool):
+                score = 0
+                img = p.get('image_url')
+                subcat = p.get('subcategory')
+                
+                # Heavy penalty if image is EXACTLY the previous one
+                if recent_images and img == recent_images[-1]:
+                    score -= 500
+                elif img in recent_images:
+                    score -= 100
+                    
+                # Penalty for adjacent same subcategory
+                if recent_subcats and subcat == recent_subcats[-1]:
+                    score -= 50
+                elif subcat in recent_subcats:
+                    score -= 20
+                    
+                # Base ordering preference (retain original ranking where possible)
+                score -= i * 5
+                
+                if score > best_score:
+                    best_score = score
+                    best_idx = i
+                    
+            chosen = pool.pop(best_idx)
+            diversified.append(chosen)
+            
+            recent_images.append(chosen.get('image_url'))
+            recent_subcats.append(chosen.get('subcategory'))
+            
+            if len(recent_images) > 3:
+                recent_images.pop(0)
+            if len(recent_subcats) > 3:
+                recent_subcats.pop(0)
+                
+        return diversified
+
+    @staticmethod
     def get_all_products(page=None, per_page=20):
         """Get all products, with optional pagination."""
         try:
@@ -221,9 +274,10 @@ class ProductService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM products ORDER BY rating DESC LIMIT %s", (limit * 2,))
+            cursor.execute("SELECT * FROM products ORDER BY rating DESC LIMIT %s", (limit * 3,))
             products = cursor.fetchall()
-            return ProductService.filter_valid_products(products)[:limit]
+            valid = ProductService.filter_valid_products(products)
+            return ProductService.diversify_feed(valid, limit)
         except Exception as e:
             print(f"Error fetching trending products: {e}")
             return []
@@ -257,9 +311,10 @@ class ProductService:
         try:
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM products WHERE category = %s", (category,))
+            cursor.execute("SELECT * FROM products WHERE category = %s ORDER BY rating DESC LIMIT 60", (category,))
             products = cursor.fetchall()
-            return ProductService.filter_valid_products(products)
+            valid = ProductService.filter_valid_products(products)
+            return ProductService.diversify_feed(valid)
         except Exception as e:
             print(f"Error: {e}")
             return []
@@ -280,10 +335,11 @@ class ProductService:
                 SELECT * FROM products 
                 WHERE name LIKE %s OR brand LIKE %s OR description LIKE %s 
                 ORDER BY rating DESC
-                LIMIT 50
+                LIMIT 100
             """, (search_term, search_term, search_term))
             products = cursor.fetchall()
-            return ProductService.filter_valid_products(products)
+            valid = ProductService.filter_valid_products(products)
+            return ProductService.diversify_feed(valid, 50)
         except Exception as e:
             print(f"Error searching products: {e}")
             return []
@@ -325,9 +381,10 @@ class ProductService:
             for cat in categories:
                 cursor.execute(
                     "SELECT * FROM products WHERE category = %s ORDER BY rating DESC LIMIT %s",
-                    (cat, per_category)
+                    (cat, per_category * 3)
                 )
-                grouped[cat] = ProductService.filter_valid_products(cursor.fetchall())
+                valid = ProductService.filter_valid_products(cursor.fetchall())
+                grouped[cat] = ProductService.diversify_feed(valid, per_category)
             
             return grouped
         except Exception as e:
