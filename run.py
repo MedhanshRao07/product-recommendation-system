@@ -325,7 +325,7 @@ class ProcessManager:
             process = subprocess.Popen(
                 [
                     str(VENV_PYTHON),
-                    "-m", "backend.run"
+                    "-m", "backend.app"
                 ],
                 cwd=str(PROJECT_ROOT),
                 env=env,
