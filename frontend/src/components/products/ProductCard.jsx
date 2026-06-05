@@ -83,6 +83,8 @@ const ProductCard = memo(({ product }) => {
                 <SafeImage 
                     src={product.image_url} 
                     alt={product.name} 
+                    category={product.category}
+                    productName={product.name}
                     className="aspect-square w-full object-contain mix-blend-multiply transition-opacity duration-300 group-hover:opacity-90"
                 />
             </div>

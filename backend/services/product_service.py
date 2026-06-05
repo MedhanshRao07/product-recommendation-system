@@ -198,29 +198,40 @@ class ProductService:
         diversified = []
         recent_images = []
         recent_subcats = []
+        seen_names = set()
+        seen_ids = set()
         
         pool = list(products)
         
         while pool and (limit is None or len(diversified) < limit):
             best_idx = 0
             best_score = -9999
+            valid_found = False
             
             for i, p in enumerate(pool):
+                if p['id'] in seen_ids or p.get('name') in seen_names:
+                    continue
+                    
+                valid_found = True
                 score = 0
                 img = p.get('image_url')
                 subcat = p.get('subcategory')
                 
-                # Heavy penalty if image is EXACTLY the previous one
-                if recent_images and img == recent_images[-1]:
-                    score -= 500
-                elif img in recent_images:
-                    score -= 100
-                    
-                # Penalty for adjacent same subcategory
-                if recent_subcats and subcat == recent_subcats[-1]:
-                    score -= 50
-                elif subcat in recent_subcats:
-                    score -= 20
+                # Dynamic image reuse penalty
+                if img in recent_images:
+                    distance = list(reversed(recent_images)).index(img)
+                    if distance == 0:
+                        score -= 500  # Adjacent
+                    else:
+                        score -= 200 * (1.0 / (distance + 1))  # Decaying penalty
+                        
+                # Dynamic subcategory reuse penalty
+                if subcat in recent_subcats:
+                    distance = list(reversed(recent_subcats)).index(subcat)
+                    if distance == 0:
+                        score -= 20
+                    else:
+                        score -= 10 * (1.0 / (distance + 1))
                     
                 # Base ordering preference (retain original ranking where possible)
                 score -= i * 5
@@ -229,15 +240,22 @@ class ProductService:
                     best_score = score
                     best_idx = i
                     
+            if not valid_found:
+                break
+                
             chosen = pool.pop(best_idx)
             diversified.append(chosen)
+            seen_ids.add(chosen['id'])
+            if chosen.get('name'):
+                seen_names.add(chosen['name'])
             
             recent_images.append(chosen.get('image_url'))
             recent_subcats.append(chosen.get('subcategory'))
             
-            if len(recent_images) > 3:
+            # Increase history memory to 8 items for stronger diversity
+            if len(recent_images) > 8:
                 recent_images.pop(0)
-            if len(recent_subcats) > 3:
+            if len(recent_subcats) > 8:
                 recent_subcats.pop(0)
                 
         return diversified
@@ -384,7 +402,18 @@ class ProductService:
                     (cat, per_category * 3)
                 )
                 valid = ProductService.filter_valid_products(cursor.fetchall())
-                grouped[cat] = ProductService.diversify_feed(valid, per_category)
+                feed = ProductService.diversify_feed(valid, per_category)
+                
+                if len(feed) < per_category:
+                    cursor.execute(
+                        "SELECT * FROM products WHERE category != %s ORDER BY rating DESC LIMIT 20",
+                        (cat,)
+                    )
+                    padding = ProductService.filter_valid_products(cursor.fetchall())
+                    padding_feed = ProductService.diversify_feed(padding, per_category - len(feed))
+                    feed.extend(padding_feed)
+                
+                grouped[cat] = feed
             
             return grouped
         except Exception as e:
@@ -422,7 +451,7 @@ class ProductService:
             """
             cursor.execute(query, (category, m_price, m_rating))
             products = ProductService.filter_valid_products(cursor.fetchall())
-            if len(products) >= 4:
+            if len(products) >= 6:
                 logger.info(f"[Recommendations] Source: Strict Filter, Count: {len(products)}")
                 return products[:10]
                 
@@ -438,7 +467,7 @@ class ProductService:
             """
             cursor.execute(query2, (category, m_price))
             products = ProductService.filter_valid_products(cursor.fetchall())
-            if len(products) >= 4:
+            if len(products) >= 6:
                 logger.info(f"[Recommendations] Source: Fallback (No Rating), Count: {len(products)}")
                 return products[:10]
 
@@ -454,7 +483,7 @@ class ProductService:
             """
             cursor.execute(query3, (category,))
             products = ProductService.filter_valid_products(cursor.fetchall())
-            if len(products) >= 4:
+            if len(products) >= 6:
                 logger.info(f"[Recommendations] Source: Fallback (Category Only), Count: {len(products)}")
                 return products[:10]
                 
@@ -652,13 +681,30 @@ class ProductService:
             final_products = ProductService.filter_valid_products(cursor.fetchall())
             
             ordered_products = []
+            seen_pnames = set()
             for sc in final_selection:
                 for fp in final_products:
                     if fp['id'] == sc['id']:
-                        fp['recommendation_reason'] = sc['recommendation_reason']
-                        ordered_products.append(fp)
+                        if fp.get('name') not in seen_pnames:
+                            fp['recommendation_reason'] = sc['recommendation_reason']
+                            ordered_products.append(fp)
+                            if fp.get('name'):
+                                seen_pnames.add(fp['name'])
                         break
                         
+            # Ensure at least 6 items
+            if len(ordered_products) < 6:
+                cursor.execute("SELECT * FROM products ORDER BY rating DESC LIMIT 20")
+                fallback_products = ProductService.filter_valid_products(cursor.fetchall())
+                for fp in fallback_products:
+                    if len(ordered_products) >= 12:
+                        break
+                    if fp.get('name') not in seen_pnames:
+                        fp['recommendation_reason'] = "Popular choice"
+                        ordered_products.append(fp)
+                        if fp.get('name'):
+                            seen_pnames.add(fp['name'])
+                            
             return ordered_products
             
         except Exception as e:
