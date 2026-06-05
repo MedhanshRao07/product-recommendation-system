@@ -44,9 +44,34 @@ const Recommendations = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center pt-16">
-                <div className="animate-spin rounded-full h-10 w-10 border-2 border-black border-t-transparent mb-4"></div>
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Analyzing your preferences...</p>
+            <div className="min-h-screen bg-[#fafafa] pt-20 pb-16">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 animate-pulse">
+                        <div>
+                            <div className="h-3 w-24 bg-gray-200 mb-3 rounded"></div>
+                            <div className="h-8 w-64 bg-gray-300 mb-2 rounded"></div>
+                            <div className="h-4 w-96 bg-gray-200 rounded"></div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                        {[...Array(8)].map((_, i) => (
+                            <div key={i} className="border-2 border-gray-100 bg-white flex flex-col h-[400px] animate-pulse">
+                                <div className="aspect-square bg-gray-200 w-full"></div>
+                                <div className="p-4 flex flex-col flex-grow">
+                                    <div className="h-2 w-16 bg-gray-200 mb-3 rounded"></div>
+                                    <div className="h-4 w-3/4 bg-gray-300 mb-2 rounded"></div>
+                                    <div className="h-4 w-1/2 bg-gray-200 mb-6 rounded"></div>
+                                    <div className="mt-auto pt-3 border-t border-gray-100 flex justify-between items-center">
+                                        <div className="h-6 w-16 bg-gray-300 rounded"></div>
+                                        <div className="flex gap-2 w-1/2">
+                                            <div className="h-8 w-full bg-gray-200 rounded"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
         );
     }
@@ -86,9 +111,9 @@ const Recommendations = () => {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8">
                     <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#ed7844] mb-1">Personalized</p>
-                        <h1 className="text-3xl font-black uppercase tracking-tight">Your Tailored Picks</h1>
-                        <p className="mt-1 text-sm text-gray-500 font-medium">Based on your activity and our AI engine, here are the best matches.</p>
+                        <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#ed7844] mb-1">Intelligently Curated</p>
+                        <h1 className="text-3xl font-black uppercase tracking-tight">Your Smart Picks</h1>
+                        <p className="mt-1 text-sm text-gray-500 font-medium">Dynamically updated based on your recent views, similar tastes, and trending items.</p>
                     </div>
                     <Link
                         to="/preferences"

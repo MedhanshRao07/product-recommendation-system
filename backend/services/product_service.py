@@ -567,6 +567,14 @@ class ProductService:
                     """, (user_id,))
                     user_history_ids = [row['product_id'] for row in cursor.fetchall()]
                     
+                    # Fetch latest viewed product name for dynamic labels
+                    latest_viewed_name = None
+                    if user_history_ids:
+                        cursor.execute("SELECT name FROM products WHERE id = %s", (user_history_ids[0],))
+                        row = cursor.fetchone()
+                        if row:
+                            latest_viewed_name = row['name']
+                    
                     if user_history_ids:
                         # 1. Get Collaborative Filtering scores
                         cf_results = collab_filter.get_collaborative_recommendations(
@@ -620,6 +628,21 @@ class ProductService:
                                 0.15 * popularity_score
                             )
                             
+                            # Assign intelligent recommendation label
+                            reason = "Top pick for you"
+                            if similarity_score > 0.4 and similarity_score > collab_score and latest_viewed_name:
+                                # Keep label short by truncating name if needed
+                                short_name = latest_viewed_name[:20] + '...' if len(latest_viewed_name) > 20 else latest_viewed_name
+                                reason = f"Because you viewed {short_name}"
+                            elif collab_score > 0.4 and collab_score > similarity_score:
+                                reason = "People also viewed"
+                            elif behavior_score > 0.6:
+                                reason = f"Trending in {rec.get('category', 'your interests')}"
+                            elif popularity_score > 0.8:
+                                reason = "Highly rated"
+                                
+                            rec['recommendation_reason'] = reason
+                            
                             scored_recs.append((rec, final_score))
                         
                         scored_recs.sort(key=lambda x: x[1], reverse=True)
@@ -637,12 +660,18 @@ class ProductService:
             # Apply safety validation
             valid_recs = ProductService.filter_valid_products(unique_recs)
             
+            # Default labels if not set by ML (fallback)
+            for rec in valid_recs:
+                if 'recommendation_reason' not in rec:
+                    rec['recommendation_reason'] = f"Trending in {rec.get('category', 'your interests')}"
+            
             # Fallback if we filtered out too many
             if len(valid_recs) < 4:
                 logger.warning(f"[Auto-Recommend] Too few valid recommendations ({len(valid_recs)}), fetching trending.")
                 trending = ProductService.get_trending_products(12)
                 for t in trending:
                     if t['id'] not in [v['id'] for v in valid_recs]:
+                        t['recommendation_reason'] = "Popular choice"
                         valid_recs.append(t)
             
             return valid_recs[:12]

@@ -70,12 +70,22 @@ const ProductCard = ({ product }) => {
                 </div>
             )}
 
+            {/* Recommendation badge */}
+            {product.recommendation_reason && (
+                <div className="absolute top-3 right-3 z-10 bg-white border-2 border-black text-black text-[9px] font-bold tracking-wider px-2 py-0.5 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] flex items-center gap-1 max-w-[60%] text-right leading-tight">
+                    <span className="text-[#ed7844]">✦</span>
+                    {product.recommendation_reason}
+                </div>
+            )}
+
             {/* Image */}
-            <SafeImage 
-                src={product.image_url} 
-                alt={product.name} 
-                className="aspect-square w-full"
-            />
+            <div className="overflow-hidden border-b border-gray-100 bg-gray-50">
+                <SafeImage 
+                    src={product.image_url} 
+                    alt={product.name} 
+                    className="aspect-square w-full object-contain transition-transform duration-700 ease-out group-hover:scale-105"
+                />
+            </div>
 
             {/* Info */}
             <div className="p-4 flex flex-col flex-grow">
